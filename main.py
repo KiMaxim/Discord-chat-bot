@@ -1,27 +1,34 @@
-import discord, os
+import discord, os, requests, json
 from dotenv import load_dotenv
+from discord.ext import commands
+from google import generativeai as genai
 
 load_dotenv()
-token = os.getenv("MY_TOKEN")
-if token is None:
-    raise RuntimeError("Token is missing!")
-
-class MyClient(discord.Client):
-    async def on_ready(self):
-        print(f'Logged on as {self.user}!')
-
-    async def on_message(self, message):
-        if message.author == self.user:
-            return
-
-        if message.content.startswith('$hello'):
-            await message.channel.send('Hello World!')
-        
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+GEMINI_KEY = os.getenv('GEMINI_KEY')
+genai.configure(api_key=GEMINI_KEY)
+if DISCORD_TOKEN is None:
+    raise RuntimeError("DISCORD_TOKEN is missing!")
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.messages = True    
 
-client = MyClient(intents=intents)
-client.run(token)
+# client = discord.Client(intents=intents) - this is low-level way of implementation, need to implement functions manually
+
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+model = genai.GenerativeModel('gemini-2.5-flash')
+
+@bot.event
+async def on_ready():
+    print(f'We have logged in as {bot.user}')
+
+
+@bot.command()
+async def chat(ctx, *, message:str):
+    await ctx.send('Thinking...')
+    response = model.generate_content(message)
+    await ctx.send(response.text)
+
+bot.run(DISCORD_TOKEN)
 
