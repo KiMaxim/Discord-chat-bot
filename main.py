@@ -27,7 +27,6 @@ model = genai.GenerativeModel(  #type: ignore
         - Sometimes cryptic but ultimately helpful"""
 
     ) 
-
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
