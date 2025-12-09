@@ -1,4 +1,6 @@
-import discord, os, requests, json
+import discord
+import os
+import json
 from dotenv import load_dotenv
 from discord.ext import commands
 import google.generativeai as genai
@@ -6,31 +8,178 @@ import google.generativeai as genai
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_KEY = os.getenv('GEMINI_KEY')
-genai.configure(api_key=GEMINI_KEY) #type:ignore
+
+genai.configure(api_key=GEMINI_KEY) # type: ignore
+
 if DISCORD_TOKEN is None:
     raise RuntimeError("DISCORD_TOKEN is missing!")
 
 intents = discord.Intents.default()
 intents.message_content = True
 
-# client = discord.Client(intents=intents) - this is low-level way of implementation, need to implement functions manually
-
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-model = genai.GenerativeModel(  #type: ignore
-        model_name='gemini-2.5-flash',
-        system_instruction="""You are a wise old wizard named Merlin who speaks in a mystical way.
-    
-        - Use archaic language occasionally ("thou", "thee", "mayhaps")
-        - Reference magic and spells in your explanations
-        - Wise but has a good sense of humor
-        - Sometimes cryptic but ultimately helpful"""
+# Settings storage
+SETTINGS_FILE = 'bot_settings.json'
 
-    ) 
+# Default settings
+default_settings = {
+    'personality': 'luna',  # luna, wizard, pirate, professional
+    'response_length': 'medium',  # short, medium, long
+    'use_emojis': True,
+    'temperature': 0.7  # 0.0 to 1.0 (creativity level)
+}
+
+# Load settings from file
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {'guilds': {}}
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, 'w') as f:
+        json.dump(settings, f, indent=2)
+
+def get_guild_settings(guild_id):
+    settings = load_settings()
+    guild_id_str = str(guild_id)
+    if guild_id_str not in settings['guilds']:
+        settings['guilds'][guild_id_str] = default_settings.copy()
+        save_settings(settings)
+    return settings['guilds'][guild_id_str]
+
+def update_guild_setting(guild_id, key, value):
+    settings = load_settings()
+    guild_id_str = str(guild_id)
+    if guild_id_str not in settings['guilds']:
+        settings['guilds'][guild_id_str] = default_settings.copy()
+    settings['guilds'][guild_id_str][key] = value
+    save_settings(settings)
+
+# Personality presets
+personalities = {
+    'luna': """You are Luna, a cheerful and helpful AI assistant!
+    Personality:
+    - Always enthusiastic and uses exclamation marks
+    - Makes puns occasionally
+    - Refers to users as 'friend' or 'buddy'
+    Speaking style:
+    - Casual and friendly tone
+    - Keeps responses concise but warm""",
+    
+    'wizard': """You are Merlin, a wise old wizard.
+    Personality:
+    - Use archaic language occasionally ("thou", "thee", "mayhaps")
+    - Reference magic and spells in explanations
+    - Wise but has a good sense of humor
+    Speaking style:
+    - Mystical and educational
+    - Sometimes cryptic but ultimately helpful""",
+    
+    'pirate': """You are Captain Blackbeard, a friendly pirate.
+    Personality:
+    - Talk like a pirate (arr, matey, ye)
+    - Reference sailing and treasure
+    - Adventurous and bold
+    Speaking style:
+    - Nautical terms and pirate slang
+    - Enthusiastic and colorful language""",
+    
+    'professional': """You are a professional AI assistant.
+    Personality:
+    - Polite and formal
+    - Focus on accuracy and clarity
+    - Respectful and courteous
+    Speaking style:
+    - Clear and concise
+    - Professional tone
+    - Well-structured responses"""
+}
+
+def get_model_with_settings(guild_id):
+    settings = get_guild_settings(guild_id)
+    personality = personalities.get(settings['personality'], personalities['luna'])
+    
+    # Add response length instruction
+    length_instructions = {
+        'short': '\n- Keep responses brief (1-2 sentences when possible)',
+        'medium': '\n- Keep responses moderate length (2-4 sentences)',
+        'long': '\n- Provide detailed responses with examples'
+    }
+    
+    # Add emoji instruction
+    emoji_instruction = '' if settings['use_emojis'] else '\n- Do not use emojis'
+    
+    full_instruction = personality + length_instructions[settings['response_length']] + emoji_instruction
+    
+    return genai.GenerativeModel( #type: ignore
+        model_name='gemini-1.5-flash',
+        system_instruction=full_instruction
+    )
+
+# Settings View using Discord UI
+class SettingsView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=180)  # 3 minute timeout
+        self.guild_id = guild_id
+    
+    @discord.ui.select(
+        placeholder="Choose Personality",
+        options=[
+            discord.SelectOption(label="Luna (Cheerful)", value="luna", emoji="🌙"),
+            discord.SelectOption(label="Wizard (Mystical)", value="wizard", emoji="🧙"),
+            discord.SelectOption(label="Pirate (Adventurous)", value="pirate", emoji="🏴‍☠️"),
+            discord.SelectOption(label="Professional", value="professional", emoji="💼")
+        ]
+    )
+    async def personality_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        update_guild_setting(self.guild_id, 'personality', select.values[0])
+        await interaction.response.send_message(
+            f"✅ Personality changed to **{select.values[0].title()}**!",
+            ephemeral=True
+        )
+    
+    @discord.ui.select(
+        placeholder="Response Length",
+        options=[
+            discord.SelectOption(label="Short", value="short", emoji="📝"),
+            discord.SelectOption(label="Medium", value="medium", emoji="📄"),
+            discord.SelectOption(label="Long", value="long", emoji="📚")
+        ]
+    )
+    async def length_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        update_guild_setting(self.guild_id, 'response_length', select.values[0])
+        await interaction.response.send_message(
+            f"✅ Response length set to **{select.values[0]}**!",
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="Toggle Emojis", style=discord.ButtonStyle.primary, emoji="😊")
+    async def emoji_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = get_guild_settings(self.guild_id)
+        new_value = not settings['use_emojis']
+        update_guild_setting(self.guild_id, 'use_emojis', new_value)
+        status = "enabled" if new_value else "disabled"
+        await interaction.response.send_message(
+            f"✅ Emojis **{status}**!",
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="Reset to Default", style=discord.ButtonStyle.danger, emoji="🔄")
+    async def reset_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = load_settings()
+        settings['guilds'][str(self.guild_id)] = default_settings.copy()
+        save_settings(settings)
+        await interaction.response.send_message(
+            "✅ Settings reset to default!",
+            ephemeral=True
+        )
+
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
-
 
 @bot.event
 async def on_message(message):
@@ -39,32 +188,90 @@ async def on_message(message):
     await bot.process_commands(message)
 
 @bot.command()
-async def chat(ctx, *, message:str):
-    await ctx.send('Thinking...')
-    try:
-        response = model.generate_content(message)
-    except Exception as er:
-        await ctx.send("Gemini is not responding, blame Google")
-        print(f"Error is {er}")
-        return
-    chunks = smart_split(response.text)
-    for chunk in chunks:
-        print(f"{ctx.author} and {ctx.channel}")
-        await ctx.send(chunk)
+async def settings(ctx):
+    """Open the settings menu"""
+    current_settings = get_guild_settings(ctx.guild.id)
+    
+    embed = discord.Embed(
+        title="⚙️ Bot Settings",
+        description="Customize how I respond to you!",
+        color=discord.Color.blue()
+    )
+    
+    embed.add_field(
+        name="🎭 Current Personality",
+        value=f"`{current_settings['personality'].title()}`",
+        inline=True
+    )
+    embed.add_field(
+        name="📏 Response Length",
+        value=f"`{current_settings['response_length'].title()}`",
+        inline=True
+    )
+    embed.add_field(
+        name="😊 Emojis",
+        value=f"`{'Enabled' if current_settings['use_emojis'] else 'Disabled'}`",
+        inline=True
+    )
+    
+    embed.set_footer(text="Use the dropdowns and buttons below to change settings")
+    
+    view = SettingsView(ctx.guild.id)
+    await ctx.send(embed=embed, view=view)
 
-def smart_split(text, limit=1500):  
+@bot.command()
+async def viewsettings(ctx):
+    """View current settings in detail"""
+    settings = get_guild_settings(ctx.guild.id)
+    
+    embed = discord.Embed(
+        title="📋 Current Settings",
+        color=discord.Color.green()
+    )
+    
+    for key, value in settings.items():
+        embed.add_field(name=key.replace('_', ' ').title(), value=f"`{value}`", inline=False)
+    
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def chat(ctx, *, message: str):
+    thinking_msg = await ctx.send('Thinking...')
+    
+    try:
+        # Get model with current settings
+        model = get_model_with_settings(ctx.guild.id)
+        response = model.generate_content(message)
+        
+        await thinking_msg.delete()
+        
+        chunks = smart_split(response.text)
+        for chunk in chunks:
+            await ctx.send(chunk)
+            
+    except Exception as er:
+        await thinking_msg.delete()
+        await ctx.send("Gemini is not responding, blame Google 😅")
+        print(f"Error: {er}")
+
+def smart_split(text, limit=1500):
+    if not text:
+        return ["(Empty response)"]
+    
     chunks = []
     current = ""
+    
     for line in text.splitlines(keepends=True):
         if len(current) + len(line) > limit:
-            chunks.append(current)
-            current = ""
-        current = current + line
-
+            if current:
+                chunks.append(current)
+            current = line
+        else:
+            current += line
+    
     if current:
         chunks.append(current)
-
-    return chunks
+    
+    return chunks if chunks else [text]
 
 bot.run(DISCORD_TOKEN)
-
