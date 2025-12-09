@@ -9,7 +9,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_KEY = os.getenv('GEMINI_KEY')
 
-genai.configure(api_key=GEMINI_KEY)
+genai.configure(api_key=GEMINI_KEY) # type: ignore
 
 if DISCORD_TOKEN is None:
     raise RuntimeError("DISCORD_TOKEN is missing!")
@@ -156,7 +156,7 @@ def get_model_with_settings(guild_id):
     
     full_instruction = personality + length_instructions[settings['response_length']] + emoji_instruction
     
-    return genai.GenerativeModel(
+    return genai.GenerativeModel( # type: ignore
         model_name='gemini-1.5-flash',
         system_instruction=full_instruction
     )
