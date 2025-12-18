@@ -1,0 +1,11 @@
+{
+  "guilds": {
+    "1439239285101432834": {
+      "personality": "spiderman",
+      "response_length": "short",
+      "use_emojis": true,
+      "temperature": 0.7
+    }
+  }
+}
+
