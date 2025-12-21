@@ -25,7 +25,7 @@ SETTINGS_FILE = 'bot_settings.json' #keep per-server (guild) settings
 defaul_settings = {
     'personality': 'luna',
     'response_length': 'short',
-    'emojis': 'true',
+    'emojis': True,
     'creativity_level': 0.8
 }
 
@@ -44,7 +44,7 @@ Speaking style:
 - Optimistic and encouraging
 - May include science references or web-slinging puns""",
 
-    'jarvis': """You are Jarvis, Tony Stark's AI assistant.
+'jarvis': """You are Jarvis, Tony Stark's AI assistant.
 Personality:
 - Extremely intelligent, precise, and logical
 - Polite, calm, and formal
@@ -100,8 +100,8 @@ def get_model_with_settings(guild_id):
 
     emoji_instruction = '' if settings['emojis'] else '\n- Do not use emojis'
 
-    full_instruction = personality + lenght_intructions[settings] + emoji_instruction
-
+    full_instruction = personality + lenght_intructions[settings['response_length']] + emoji_instruction
+ 
     return genai.GenerativeModel( #type: ignore
         model_name = 'gemini-2.5-flash',
         system_instruction = full_instruction
@@ -167,7 +167,7 @@ async def on_message(message):
         
 @bot.command()
 async def settings(ctx):
-    current_settings = get_guild_settins(ctx.guild_id)
+    current_settings = get_guild_settins(ctx.guild.id)
     embed = discord.Embed(
         title='Bot settings',
         description='Customize how I respond to you',
@@ -186,17 +186,20 @@ async def settings(ctx):
     )
     embed.add_field(
         name="😊 Emojis",
-        value=f"`{'Enabled' if current_settings['use_emojis'] else 'Disabled'}`",
+        value=f"`{'Enabled' if current_settings['emojis'] else 'Disabled'}`",
         inline=True
     )
     embed.set_footer(text="Use the dropdowns and buttons below to change settings")
     
-    view = SettingsView(guild_id=ctx.guild_id)
+    view = SettingsView(guild_id=ctx.guild.id)
     await ctx.send(embed=embed, view=view)
 
 @bot.command()
 async def chat(ctx, *, message: str):
-    thinking_message = ctx.send("Thinking to asnwer your dumna ass question...")
+    print(f"DEBUG: Message content: '{ctx.message.content}'")
+    print(f"DEBUG: Message content: '{ctx.message.author}'")
+
+    thinking_message = await ctx.send("Thinking to asnwer your dumb ass question...")
     try:
         model = get_model_with_settings(ctx.guild.id)
         response = model.generate_content(message)
@@ -206,7 +209,7 @@ async def chat(ctx, *, message: str):
         for chunk in chunks:
             await ctx.send(chunk)
     except Exception as er:
-        thinking_message.delete()
+        await thinking_message.delete()
         print(f"Error is {er}")
         raise RuntimeError("Gemini is not responding, blame google")
 
@@ -230,7 +233,3 @@ def smart_split(text, limit = 1500):
 
 bot.run(DISCORD_TOKEN)
     
-        
-        
-
-        
